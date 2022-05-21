@@ -1,0 +1,42 @@
+version: '3'
+
+services:
+  db:
+    image: postgres:latest
+    container_name: nextcloud-postgres
+    networks:
+      - nextcloud_network
+    volumes:
+      - ./database:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - POSTGRES_DB=nextcloud
+      - POSTGRES_USER=nextcloud
+      - POSTGRES_PASSWORD=pgrandompassword
+    restart: unless-stopped
+
+  app:
+    image: 0xb1b1/nextcloud:latest
+    container_name: nextcloud-app
+    networks:
+      - nextcloud_network
+    depends_on:
+      - db
+    ports:
+      - 23400:80
+    volumes:
+      - ./app:/var/www/html
+      - /mnt/your-drive/docker/mounts/nextcloud/app/config:/var/www/html/config
+      - /mnt/your-drive/docker/mounts/nextcloud/app/custom_apps:/var/www/html/custom_apps
+      - /mnt/your-drive/docker/mounts/nextcloud/app/data:/var/www/html/data
+      - /mnt/your-drive/docker/mounts/nextcloud/app/themes:/var/www/html/themes
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_DB=nextcloud
+      - POSTGRES_USER=nextcloud
+      - POSTGRES_PASSWORD=pgrandompassword
+    restart: unless-stopped
+
+networks:
+  nextcloud_network:

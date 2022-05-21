@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  web:
+    image: nginx:stable-alpine
+    container_name: element-web
+    restart: unless-stopped
+    ports:
+      - "23415:80"
+    volumes:
+      - ./element:/usr/share/nginx/html/

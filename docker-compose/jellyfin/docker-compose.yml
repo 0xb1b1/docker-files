@@ -1,0 +1,23 @@
+version: "3.5"
+
+services:
+  app:
+    image: jellyfin/jellyfin
+    container_name: jellyfin-app
+    user: 1000:1000
+    #network_mode: "host"
+    ports:
+      - 23402:8096
+    networks:
+      - network
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      #- /mnt/large_ssd0/docker/mounts/jellyfin/media:/media
+      #- /mnt/large_ssd1/docker/mounts/media2:/media2:ro
+    restart: "unless-stopped"
+    # Optional - alternative address used for autodiscovery
+    #environment:
+      #- JELLYFIN_PublishedServerUrl=https://fqdn.example
+networks:
+  network:
