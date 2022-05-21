@@ -1,0 +1,45 @@
+version: "3"
+
+# More info at https://github.com/pi-hole/docker-pi-hole/ and https://docs.pi-hole.net/
+services:
+  app:
+    container_name: pihole_app
+    image: pihole/pihole:latest
+    networks:
+      pihole:
+        ipv4_address: 10.234.11.2
+    # For DHCP it is recommended to remove these ports and instead add: network_mode: "host"
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "23411:80/tcp"  # Administration port
+     #- "67:67/udp" # Only required if you are using Pi-hole as your DHCP server
+    environment:
+      TZ: 'Continent/City'
+      WEBPASSWORD: 'webadminpassword'
+    depends_on:
+      - "doh"
+    # Volumes store your data between container upgrades
+    volumes:
+      - './etc-pihole:/etc/pihole'
+      - './etc-dnsmasq.d:/etc/dnsmasq.d'
+    #   https://github.com/pi-hole/docker-pi-hole#note-on-capabilities
+    #cap_add:
+     #- NET_ADMIN # Required if you are using Pi-hole as your DHCP server, else not needed
+    restart: unless-stopped
+  doh:
+    container_name: pihole_doh
+    image: visibilityspots/cloudflared:latest
+    networks:
+      pihole:
+        ipv4_address: 10.234.11.3
+    environment:
+      PORT: '53'
+    restart: unless-stopped
+
+networks:
+  pihole:
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.234.11.0/24
