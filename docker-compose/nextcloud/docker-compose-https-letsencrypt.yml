@@ -1,7 +1,6 @@
 version: '3'
 
 services:
-
   proxy:
     image: 0xb1b1/nginx-proxy:alpine
     labels:
