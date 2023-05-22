@@ -1,0 +1,252 @@
+---
+version: "3.8"
+
+# This configuration is made for Traefik reverse proxy.
+# If you're using something else, use ports defined in loadbalancer.server.port Traefik labels.
+
+# If the subnet defined in this configuration conflicts with an existing subnet on your system,
+# use another one and don't forget to modify FIREWALL_OUTBOUND_SUBNETS environment variable
+# so that gluetun is able to forward requests to that subnet. Otherwise, Jellyseer won't be able
+# to communicate with Jellyfin.
+
+# You should use localhost:<service port> for all services connected to gluetun 
+# that are using the network_mode directive. For example, to connect Radarr to Transmission,
+# add Transmission under address `localhost:9091`.
+
+networks:
+  default:
+    attachable: true
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 192.168.147.0/24
+          ip_range: 192.168.147.0/24
+          gateway: 192.168.147.254
+          aux_addresses:
+            jellyfin: 192.168.147.1
+          #   gluetun: 192.168.147.2
+          #   jellyseerr: 192.168.147.3
+          #   sonarr: 192.168.147.4
+          #   radarr: 192.168.147.5
+
+volumes:
+  config:  # Pending rename to `jellyfin-config`
+  cache:  # Pending rename to `jellyfin-cache`
+  jellyseerr-config:
+  sonarr-config:
+  radarr-config:
+  lidarr-config:
+  prowlarr-config:
+  transmission-config:
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    restart: unless-stopped
+    networks:
+      default:
+        ipv4_address: 192.168.147.1
+    user: 1000:1000
+    group_add:
+      - "989"
+    volumes:
+      - "config:/config"
+      - "cache:/cache"
+      - "${JELLYFIN_MEDIA_STORAGE_ROOT}:/media"
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri/card0:/dev/dri/card0
+    environment:
+      - JELLYFIN_PublishedServerUrl=${JELLYFIN_URL}  # Include protocol prefix (e.g. `https://)
+      - HEALTHCHECK_URL=http://localhost:80/health  # Change the server's default port to 8096 here or to 80 in /config/config/network.xml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.jellyfin.loadbalancer.server.port=80"
+      - "traefik.http.routers.jellyfin.rule=Host(`jellyfin.${ROOT_FQDN}`)"
+      - "traefik.http.routers.jellyfin.entrypoints=websecure"
+      - "traefik.http.routers.jellyfin.tls=true"
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    restart: always
+    networks:
+      default:
+        # ipv4_address: 192.168.147.2
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - FIREWALL_OUTBOUND_SUBNETS=${FIREWALL_OUTBOUND_SUBNETS}
+      - DNS_KEEP_NAMESERVER=on
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+      - VPN_ENDPOINT_IP=${VPN_ENDPOINT_IP}
+      - VPN_ENDPOINT_PORT=${VPN_ENDPOINT_PORT}
+      - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY}
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_PRESHARED_KEY=${WIREGUARD_PRESHARED_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    restart: always
+    network_mode: "service:gluetun"
+
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      jellyfin:
+        condition: service_healthy
+      sonarr:
+        condition: service_healthy
+      radarr:
+        condition: service_healthy
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL}
+      - TZ=${TZ}
+    volumes:
+      - "jellyseerr-config:/app/config"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.jellyseerr.loadbalancer.server.port=5055"
+      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr.${ROOT_FQDN}`)"
+      - "traefik.http.routers.jellyseerr.entrypoints=websecure"
+      - "traefik.http.routers.jellyseerr.tls=true"
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    restart: always
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    volumes:
+      - "prowlarr-config:/config"
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.prowlarr.loadbalancer.server.port=9696"
+      - "traefik.http.routers.prowlarr.rule=Host(`prowlarr.${ROOT_FQDN}`)"
+      - "traefik.http.routers.prowlarr.entrypoints=websecure"
+      - "traefik.http.routers.prowlarr.tls=true"
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    restart: always
+    network_mode: "service:gluetun"
+    depends_on:
+      prowlarr:
+        condition: service_started
+      gluetun:
+        condition: service_healthy
+      transmission:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    volumes:
+      - "sonarr-config:/config"
+      - "${JELLYFIN_MEDIA_STORAGE_ROOT}/videos/shows/shows:/shows"
+      - "${JELLYFIN_MEDIA_STORAGE_ROOT}/videos/anime:/anime"
+      - "${TRANSMISSION_DOWNLOADS_STORAGE_ROOT}:/downloads"
+    healthcheck:
+      test: curl --fail http://localhost:8989 || exit 1
+      interval: 20s
+      retries: 5
+      start_period: 7s
+      timeout: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.sonarr.loadbalancer.server.port=8989"
+      - "traefik.http.routers.sonarr.rule=Host(`sonarr.${ROOT_FQDN}`)"
+      - "traefik.http.routers.sonarr.entrypoints=websecure"
+      - "traefik.http.routers.sonarr.tls=true"
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    restart: always
+    network_mode: "service:gluetun"
+    depends_on:
+      prowlarr:
+        condition: service_started
+      gluetun:
+        condition: service_healthy
+      transmission:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    volumes:
+      - "radarr-config:/config"
+      - "${JELLYFIN_MEDIA_STORAGE_ROOT}/videos/movies/movies:/movies"
+      - "${TRANSMISSION_DOWNLOADS_STORAGE_ROOT}:/downloads"
+    healthcheck:
+      test: curl --fail http://localhost:7878 || exit 1
+      interval: 20s
+      retries: 5
+      start_period: 7s
+      timeout: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.radarr.loadbalancer.server.port=7878"
+      - "traefik.http.routers.radarr.rule=Host(`radarr.${ROOT_FQDN}`)"
+      - "traefik.http.routers.radarr.entrypoints=websecure"
+      - "traefik.http.routers.radarr.tls=true"
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    restart: always
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    volumes:
+      - "lidarr-config:/config"
+      - "${JELLYFIN_MEDIA_STORAGE_ROOT}/music/music:/music"
+      - "${TRANSMISSION_DOWNLOADS_STORAGE_ROOT}:/downloads"
+    healthcheck:
+      test: curl --fail http://localhost:8686 || exit 1
+      interval: 20s
+      retries: 5
+      start_period: 7s
+      timeout: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.lidarr.loadbalancer.server.port=8686"
+      - "traefik.http.routers.lidarr.rule=Host(`lidarr.${ROOT_FQDN}`)"
+      - "traefik.http.routers.lidarr.entrypoints=websecure"
+      - "traefik.http.routers.lidarr.tls=true"
+
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    restart: always
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+      # - TRANSMISSION_WEB_HOME= #optional
+      # - USER= #optional
+      # - PASS= #optional
+      # - WHITELIST= #optional
+      # - PEERPORT= #optional
+      # - HOST_WHITELIST= #optional
+    volumes:
+      - "transmission-config:/config"
+      - "${TRANSMISSION_DOWNLOADS_STORAGE_ROOT}:/downloads"
+      # - "/path/to/watch/folder:/watch"
+    # ports:
+      # - 9091:9091
+      # - 51413:51413
+      # - 51413:51413/udp
+    healthcheck:
+      test: curl --fail http://localhost:9091 || exit 1
+      interval: 20s
+      retries: 5
+      start_period: 10s
+      timeout: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.transmission.loadbalancer.server.port=9091"
+      - "traefik.http.routers.transmission.rule=Host(`transmission.${ROOT_FQDN}`)"
+      - "traefik.http.routers.transmission.entrypoints=websecure"
+      - "traefik.http.routers.transmission.tls=true"
+
